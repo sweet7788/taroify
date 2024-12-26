@@ -1,7 +1,9 @@
-import { Events } from "@tarojs/taro"
 import * as _ from "lodash"
-import { CSSProperties, isValidElement, ReactNode, useEffect } from "react"
-import { NotifyColor } from "./notify.shared"
+import { createElement, isValidElement, ReactNode } from "react"
+import { document, TaroNode } from "@tarojs/runtime"
+import { mountPortal, unmountPortal, getPagePath } from "../utils/dom/portal"
+import { NotifyColor, notifyEvents, NotifyOptions, notifySelectorSet } from "./notify.shared"
+import Notify from "./notify"
 
 const initialNotifyOptions: NotifyOptions = {
   className: undefined,
@@ -12,6 +14,7 @@ const initialNotifyOptions: NotifyOptions = {
 }
 
 const DEFAULT_NOTIFY_SELECTOR = "#notify"
+const DEFAULT_NOTIFY_SELECTOR_CREATE = "notify"
 
 const defaultNotifyOptions: NotifyOptions = {}
 
@@ -28,50 +31,36 @@ export function resetDefaultNotifyOptions() {
   })
 }
 
-const notifyEvents = new Events()
-
-export function useNotifyOpen(cb: (options: NotifyOptions) => void) {
-  useEffect(() => {
-    notifyEvents.on("open", cb)
-    return () => {
-      notifyEvents.off("open", cb)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-}
-
-export function useNotifyClose(cb: (selector: string) => void) {
-  useEffect(() => {
-    notifyEvents.on("close", cb)
-    return () => {
-      notifyEvents.off("close", cb)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-}
-
-export interface NotifyOptions {
-  selector?: string
-  className?: string
-  style?: CSSProperties
-  color?: NotifyColor
-  duration?: number
-  message?: ReactNode
-
-  onClose?(opened: boolean): void
-}
-
 function parseNotifyOptions(message: ReactNode | NotifyOptions): NotifyOptions {
   const options = !isValidElement(message) && _.isPlainObject(message) ? message : { message }
   return _.assign({}, initialNotifyOptions, defaultNotifyOptions, options)
 }
 
+const notifyView = document.createElement("view")
+
 export function openNotify(args: ReactNode | NotifyOptions) {
   const { selector = "#notify", ...restOptions } = parseNotifyOptions(args)
-  notifyEvents.trigger("open", {
-    selector,
-    ...restOptions,
-  })
+  if (selector && notifySelectorSet.has(`${getPagePath()}__${selector}`)) {
+    notifyEvents.trigger("open", {
+      selector,
+      ...restOptions,
+    })
+  } else {
+    const onTransitionExited = restOptions.onTransitionExited
+    restOptions.onTransitionExited = () => {
+      onTransitionExited?.()
+      unmountPortal(notifyView)
+    }
+    mountPortal(
+      createElement(Notify, {
+        ...restOptions,
+        children: restOptions.message,
+        defaultOpen: true,
+        id: selector === DEFAULT_NOTIFY_SELECTOR ? DEFAULT_NOTIFY_SELECTOR_CREATE : selector,
+      }) as unknown as TaroNode,
+      notifyView,
+    )
+  }
 }
 
 export function createNotify(color: NotifyColor) {
@@ -83,5 +72,5 @@ export function createNotify(color: NotifyColor) {
 }
 
 export function closeNotify(selector?: string) {
-  notifyEvents.trigger("close", selector ?? defaultNotifyOptions.selector)
+  notifyEvents.trigger("close", selector ? `#${selector}` : defaultNotifyOptions.selector)
 }
